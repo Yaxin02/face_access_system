@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ai_env/
+ENV/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Project data (keep local / on SSD)
+dataset/
+database/*.pkl
+models/*.pkl
+data/
+
+# Training outputs
+models/*.pth
+models/*.pt
+models/*.pkl
+reports/
+
+# ByteRover (optional local knowledge)
+.brv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+train/
+test/
+vggface2_train/
+vggface2_test/
+*.tar.gz

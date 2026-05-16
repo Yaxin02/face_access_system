@@ -1,16 +1,9 @@
 """
 Train the custom face classifier on processed face crops.
-
-Uses paths from config/paths.py (.env / FACE_TRAIN_PROCESSED_DIR for SSD splits).
-
-Run:
-  python train.py
+Uses importlib to bypass Python's naming restrictions for modules starting with numbers.
 """
-from pathlib import Path
-import runpy
+import importlib
 
 if __name__ == "__main__":
-    runpy.run_path(
-        str(Path(__file__).resolve().parent / "src" / "04_train_model.py"),
-        run_name="__main__",
-    )
+    train_module = importlib.import_module("src.04_train_model")
+    train_module.train_model()

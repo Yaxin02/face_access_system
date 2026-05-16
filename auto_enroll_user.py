@@ -3,12 +3,14 @@ import os
 import time
 
 CAMERA_INDEX = 1
-DATASET_DIR = "dataset"
+# 🎯 التعديل الأول: التوجيه مباشرة للمجلد الكبير في الـ SSD 🎯
+DATASET_DIR = "/Volumes/HIKSEMI/train"
 
-TOTAL_SAMPLES = 20
-CAPTURE_DELAY = 0.25  # seconds between captures
+# 🎯 التعديل الثاني: رفع العينات لـ 150 لضمان قوة ذاكرة الموديل 🎯
+TOTAL_SAMPLES = 150  
+CAPTURE_DELAY = 0.1  # تسريع الوقت بين اللقطات لأن العدد كبر
 
-user_name = input("Enter user name: ").strip().lower()
+user_name = input("Enter user name (Write: yassin): ").strip().lower()
 
 if user_name == "":
     print("Error: user name cannot be empty.")
@@ -36,7 +38,7 @@ face_cascade = cv2.CascadeClassifier(
 
 print("Camera opened successfully.")
 print("Auto enrollment started.")
-print("Look at the camera and move your head slowly.")
+print("🔥 Look at the camera and move your head slowly (Left, Right, Up, Down) 🔥")
 print("Press q to quit.")
 
 last_capture_time = 0
@@ -95,10 +97,11 @@ while True:
                 image_name = f"{user_name}_{image_count:03d}.jpg"
                 image_path = os.path.join(user_path, image_name)
 
+                # حفظ الصورة مقصوصة مباشرة داخل الـ SSD
                 cv2.imwrite(image_path, face_img)
                 last_capture_time = current_time
 
-                print(f"Saved: {image_path}")
+                print(f"Saved to SSD: {image_path}")
 
             status_text = f"Scanning... {saved_this_session}/{TOTAL_SAMPLES}"
             status_color = (0, 255, 255)
@@ -151,6 +154,4 @@ cap.release()
 cv2.destroyAllWindows()
 
 print(f"Enrollment finished for user: {user_name}")
-print(f"New saved images this session: {saved_this_session}")
-print(f"Total images for this user: {image_count}")
-print("Now run: python3 build_database.py")
+print(f"Total images now in SSD for this user: {image_count}")

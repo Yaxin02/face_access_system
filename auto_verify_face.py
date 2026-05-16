@@ -18,7 +18,7 @@ LOG_FILE_PATH = "database/access_log.csv"
 # صنع مجلد الـ database إذا موش موجود
 os.makedirs("database", exist_ok=True)
 
-# 2. تحميل الـ Mapping (ربط الأرقام بالأسامي)
+# 2. تحميل الـ Mapping
 with open(MAPPING_PATH, 'rb') as f:
     class_to_idx = pickle.load(f)
 idx_to_class = {v: k for k, v in class_to_idx.items()}
@@ -48,16 +48,22 @@ transform = transforms.Compose([
     transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
 ])
 
-# 5. متغيرات الـ Logging لمنع التكرار
-last_logged_time = 0
-logging_cooldown = 10  # 10 ثواني مهلة بين كل تسجيل حضور
+# 5. متغيرات الـ Cooldown والـ Stabilization
+last_granted_time = 0
+last_denied_time = 0
+cooldown_duration = 10  # 10 ثواني مهلة بين الإشعارات الصوتية
 
-def log_access(name):
-    """دالة لتسجيل الحضور في ملف CSV"""
-    global last_logged_time
+# --- 🎯 عدادات التثبيت لمنع التداخل عند التشغيل 🎯 ---
+yassin_frames_counter = 0
+unknown_frames_counter = 0
+STABILIZATION_THRESHOLD = 5  # يجب أن يتكرر التوقع 5 مرات متتالية ليطلق الصوت
+
+def process_access_granted():
+    """دالة مستقلة للترحيب بياسين وتسجيله"""
+    global last_granted_time
     current_time = time.time()
     
-    if current_time - last_logged_time > logging_cooldown:
+    if current_time - last_granted_time > cooldown_duration:
         now = datetime.now()
         date_str = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H:%M:%S")
@@ -66,16 +72,27 @@ def log_access(name):
         with open(LOG_FILE_PATH, "a") as f:
             if not file_exists:
                 f.write("Name,Date,Time\n")
-            f.write(f"{name},{date_str},{time_str}\n")
+            f.write(f"yassin,{date_str},{time_str}\n")
             
-        print(f"📝 Logged: {name} at {time_str}")
-        last_logged_time = current_time
+        print(f"📝 Logged: yassin at {time_str}")
+        os.system("say 'Welcome Yassin, access granted' &")
+        last_granted_time = current_time
+
+def process_access_denied():
+    """دالة مستقلة تماماً لرفض الغرباء"""
+    global last_denied_time
+    current_time = time.time()
+    
+    if current_time - last_denied_time > cooldown_duration:
+        print("❌ Access Denied Logged")
+        os.system("say 'Access denied' &")
+        last_denied_time = current_time
 
 # 6. تشغيل الكاميرا
 cap = cv2.VideoCapture(1) # 1 لكاميرا الماك
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 
-print("📸 System Online. Smooth Access Threshold active (75%)...")
+print("📸 System Online. Frame Stabilization Active (5 frames requirement)...")
 
 while True:
     ret, frame = cap.read()
@@ -86,13 +103,16 @@ while True:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(100, 100))
 
+    # إذا ما فماش وجوه في الكاميرا، صفر العدادات فوراً
+    if len(faces) == 0:
+        yassin_frames_counter = 0
+        unknown_frames_counter = 0
+
     for (x, y, w, h) in faces:
-        # قص الوجه وتحضيره للموديل
         face_img = frame[y:y+h, x:x+w]
         face_pil = Image.fromarray(cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB))
         input_tensor = transform(face_pil).unsqueeze(0).to(DEVICE)
         
-        # التوقع الحسابي (Prediction)
         with torch.no_grad():
             outputs = model(input_tensor)
             probs = torch.nn.functional.softmax(outputs, dim=1)
@@ -100,23 +120,33 @@ while True:
             predicted_name = idx_to_class[pred_idx.item()]
             confidence = conf.item() * 100
 
-        # --- الفلترة الذكية المحدثة ---
-        if predicted_name == "yassin" and confidence > 70:
+        # التثبت الشرطي وتحديث العدادات
+        if predicted_name == "yassin" and confidence > 75:
+            yassin_frames_counter += 1
+            unknown_frames_counter = 0  # إلغاء الـ Unknown
+            
             name_to_display = "yassin"
-            color = (0, 255, 0) # أخضر ✅
+            color = (0, 255, 0)
+            
+            # ما يتكلم كان ما يتأكد 5 فريمات ورا بعضهم
+            if yassin_frames_counter >= STABILIZATION_THRESHOLD:
+                cv2.putText(frame, "ACCESS GRANTED ✅", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
+                process_access_granted()
         else:
+            unknown_frames_counter += 1
+            yassin_frames_counter = 0  # إلغاء الـ Yassin
+            
             name_to_display = "Unknown"
-            color = (0, 0, 255) # أحمر ❌
+            color = (0, 0, 255)
+            
+            # ما يتكلم كان ما يتأكد 5 فريمات ورا بعضهم
+            if unknown_frames_counter >= STABILIZATION_THRESHOLD:
+                process_access_denied()
 
-        # رسم النتائج على الشاشة
+        # رسم الإطار والنسبة
         label = f"{name_to_display} ({confidence:.1f}%)"
         cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
         cv2.putText(frame, label, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-        
-        # --- 🎯 التعديل الجديد: تم خفض نسبة الـ Access لـ 75% لمرونة كاملة 🎯 ---
-        if name_to_display == "yassin" and confidence > 75:
-            cv2.putText(frame, "ACCESS GRANTED ✅", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
-            log_access("yassin")
 
     cv2.imshow("Face Access System - M4", frame)
     

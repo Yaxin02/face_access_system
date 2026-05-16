@@ -1,54 +1,40 @@
 import cv2
 import os
 import time
-from pathlib import Path
+import importlib
 
-# --- الإعدادات ---
-# 1 غالبا Mac camera عندك | 0 غالبا iPhone camera (Continuity Camera)
-CAMERA_INDEX = 1 
+CAMERA_INDEX = 1
+DATASET_DIR = "dataset"  # المجلد المحلي للمصرح لهم
 
-# المسار الجديد مباشرة للـ SSD (عوضا عن الفولدر المحلي)
-DATASET_ROOT = "/Volumes/HIKSEMI/train_subset"
+TOTAL_SAMPLES = 150  
+CAPTURE_DELAY = 0.05  # تسريع دفق اللقطات
 
-# --- البداية ---
-user_name = input("Enter user name (e.g., yassin): ").strip().lower()
+user_name = input("👤 Enter new user name: ").strip().lower()
 
 if user_name == "":
     print("❌ Error: user name cannot be empty.")
     exit()
 
-# صنع مسار المستخدم داخل الـ SSD
-user_path = os.path.join(DATASET_ROOT, user_name)
+# 🎯 أتمتة 1: صنع المجلد تلقائياً بالاسم الجديد داخل dataset
+user_path = os.path.join(DATASET_DIR, user_name)
 os.makedirs(user_path, exist_ok=True)
 
-# فتح الكاميرا (Mac M4 Camera)
-cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_AVFOUNDATION)
-
-if not cap.isOpened():
-    print(f"❌ Error: Camera index {CAMERA_INDEX} not opened.")
-    print("Try changing CAMERA_INDEX to 0 or 2 in the code.")
-    exit()
-
-# تحميل كاشف الوجوه (Haar Cascade)
-face_cascade = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-)
-
-print("✅ Camera opened successfully.")
-print(f"📂 Saving images to: {user_path}")
-print("-" * 30)
-print("Instructions:")
-print("1. Press 's' to capture a face image.")
-print("2. Move your head slightly (left, right, up, down) for better training.")
-print("3. Aim for at least 30-50 images.")
-print("4. Press 'q' to quit when finished.")
-print("-" * 30)
-
-# حساب عدد التصاور الموجودة حالياً (بناءً على الملفات في الـ SSD)
-image_count = len([
+existing_images = [
     file for file in os.listdir(user_path)
     if file.lower().endswith((".jpg", ".jpeg", ".png"))
-])
+]
+image_count = len(existing_images)
+
+cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_AVFOUNDATION)
+if not cap.isOpened():
+    print(f"❌ Error: Camera index {CAMERA_INDEX} not opened.")
+    exit()
+
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+
+print("\n📸 Camera opened successfully. Look at the camera and move your head slowly...")
+last_capture_time = 0
+saved_this_session = 0
 
 while True:
     ret, frame = cap.read()
@@ -56,67 +42,62 @@ while True:
         print("❌ Error: Cannot read frame.")
         break
 
-    # قلب الصورة (Mirror) لتسهيل الحركة
     frame = cv2.flip(frame, 1)
-    display_frame = frame.copy()
-
-    # تحويل الصورة للرمادي للكشف عن الوجه
+    frame = cv2.resize(frame, (960, 720))
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    faces = face_cascade.detectMultiScale(
-        gray,
-        scaleFactor=1.1,
-        minNeighbors=5,
-        minSize=(100, 100)
-    )
 
-    # رسم مستطيل حول الوجه المكتشف
-    for (x, y, w, h) in faces:
-        cv2.rectangle(display_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-        cv2.putText(display_frame, "Face Ready", (x, y - 10), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(100, 100))
+    status_text = "Position your face"
+    status_color = (255, 255, 255)
 
-    # معلومات على الشاشة
-    cv2.putText(display_frame, f"User: {user_name}", (20, 40), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-    cv2.putText(display_frame, f"Count: {image_count}", (20, 80), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-
-    cv2.imshow("Face Enrollment - Mac M4", display_frame)
-
-    key = cv2.waitKey(1) & 0xFF
-
-    # الضغط على 's' للحفظ
-    if key == ord("s"):
-        if len(faces) == 0:
-            print("⚠️ No face detected! Please center your face.")
-            continue
-        
-        if len(faces) > 1:
-            print("⚠️ Too many faces! Stay alone in the frame.")
-            continue
-
-        # قص الوجه مع مساحة صغيرة (Margin)
+    if len(faces) > 0:
+        faces = sorted(faces, key=lambda face: face[2] * face[3], reverse=True)
         x, y, w, h = faces[0]
-        margin = 30
-        y1, y2 = max(0, y-margin), min(frame.shape[0], y+h+margin)
-        x1, x2 = max(0, x-margin), min(frame.shape[1], x+w+margin)
-        face_crop = frame[y1:y2, x1:x2]
 
-        # حفظ الصورة في الـ SSD
-        image_count += 1
-        img_filename = f"{user_name}_{image_count:03d}.jpg"
-        save_path = os.path.join(user_path, img_filename)
-        
-        cv2.imwrite(save_path, face_crop)
-        print(f"📸 Saved [{image_count}]: {save_path}")
+        margin = 45
+        x1 = max(0, x - margin)
+        y1 = max(0, y - margin)
+        x2 = min(frame.shape[1], x + w + margin)
+        y2 = min(frame.shape[0], y + h + margin)
 
-    # الضغط على 'q' للخروج
-    elif key == ord("q"):
+        face_img = frame[y1:y2, x1:x2]
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+
+        current_time = time.time()
+        if saved_this_session < TOTAL_SAMPLES:
+            if current_time - last_capture_time >= CAPTURE_DELAY:
+                image_count += 1
+                saved_this_session += 1
+
+                image_name = f"{user_name}_{image_count:03d}.jpg"
+                image_path = os.path.join(user_path, image_name)
+
+                cv2.imwrite(image_path, face_img)
+                last_capture_time = current_time
+
+            status_text = f"Scanning... {saved_this_session}/{TOTAL_SAMPLES}"
+            status_color = (0, 255, 255)
+        else:
+            status_text = "Enrollment completed"
+            status_color = (0, 255, 0)
+
+    cv2.putText(frame, f"User: {user_name}", (20, 45), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    cv2.putText(frame, status_text, (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 1, status_color, 2)
+    cv2.imshow("Auto Enroll User", frame)
+
+    if saved_this_session >= TOTAL_SAMPLES or (cv2.waitKey(1) & 0xFF == ord("q")):
         break
 
 cap.release()
 cv2.destroyAllWindows()
 
-print("-" * 30)
-print(f"✅ Finished! Total images for {user_name}: {image_count}")
-print(f"🚀 Now run 'python3 src/04_train_model.py' to update your model.")
+print(f"\n✅ Enrollment finished for user: {user_name} ({saved_this_session} images saved).")
+
+# 🎯 أتمتة 2: تشغيل الـ Database Builder تلقائياً في الخلفية لتحديث الـ pkl فوراً 🎯
+print("\n⚙️ Auto-triggering Database compilation... Please wait...")
+try:
+    build_db_module = importlib.import_module("src.03_build_database")
+    build_db_module.build_database()
+    print("\n🚀 All Done! New user is now live in the system.")
+except Exception as e:
+    print(f"⚠️ Could not auto-update database: {e}")

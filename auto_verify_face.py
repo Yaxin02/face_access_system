@@ -1,153 +1,101 @@
 import torch
-import torch.nn as nn
 import cv2
 import pickle
 import os
 import time
+import numpy as np
 from datetime import datetime
 from PIL import Image
 from torchvision import transforms
 from facenet_pytorch import InceptionResnetV1
 
-# 1. إعدادات الجهاز والمسارات (🎯 تم التحديث للموديل المليوني الكامل 🎯)
+# 1. إعدادات الجهاز والمسارات
 DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-MODEL_PATH = "models/face_classifier_full.pth"
-MAPPING_PATH = "models/class_mapping_full.pkl"
+DATABASE_PATH = "database/users_embeddings.pkl"
 LOG_FILE_PATH = "database/access_log.csv"
 
-# صنع مجلد الـ database إذا موش موجود
-os.makedirs("database", exist_ok=True)
+# حد المسافة الإقليدية (Threshold) - كل ما تصغره يولي السيستيم صارم أكثر
+THRESHOLD = 0.68  
 
-# 2. تحميل الـ Mapping الجديد (3048 كلاص)
-with open(MAPPING_PATH, 'rb') as f:
-    class_to_idx = pickle.load(f)
-idx_to_class = {v: k for k, v in class_to_idx.items()}
+if not os.path.exists(DATABASE_PATH):
+    print(f"❌ Error: Database file not found at {DATABASE_PATH}.")
+    print("👉 Please run: python3 build_database.py first!")
+    exit()
 
-# 3. بناء وتحميل الموديل العملاق
-base_model = InceptionResnetV1(pretrained='vggface2').to(DEVICE)
-num_classes = len(idx_to_class)
+# 2. تحميل قاعدة أوزان المستخدمين المحليين
+with open(DATABASE_PATH, 'rb') as f:
+    database = pickle.load(f)
 
-class FaceClassifier(nn.Module):
-    def __init__(self, base_model, num_classes):
-        super(FaceClassifier, self).__init__()
-        self.base_model = base_model
-        self.classifier = nn.Linear(512, num_classes)
-    
-    def forward(self, x):
-        embeddings = self.base_model(x)
-        return self.classifier(embeddings)
+print(f"👥 Active Authorized Users in DB: {list(database.keys())}")
 
-model = FaceClassifier(base_model, num_classes).to(DEVICE)
-model.load_state_dict(torch.load(MODEL_PATH))
-model.eval()
+# 3. تحميل الـ Backbone الأصلي النظيف (بدون طبقة الـ Classifier المشوشة)
+model = InceptionResnetV1(pretrained="vggface2").eval().to(DEVICE)
 
-# 4. تحضير الصورة (Preprocessing)
 transform = transforms.Compose([
     transforms.Resize((160, 160)),
     transforms.ToTensor(),
     transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
 ])
 
-# 5. متغيرات الـ Cooldown والـ Stabilization
 last_granted_time = 0
-last_denied_time = 0
-cooldown_duration = 10  
-
-yassin_frames_counter = 0
-unknown_frames_counter = 0
-STABILIZATION_THRESHOLD = 5  # الثبات على 5 إطارات قبل النطق
-
-def process_access_granted():
-    """دالة مستقلة للترحيب بياسين وتسجيله"""
-    global last_granted_time
-    current_time = time.time()
-    
-    if current_time - last_granted_time > cooldown_duration:
-        now = datetime.now()
-        date_str = now.strftime("%Y-%m-%d")
-        time_str = now.strftime("%H:%M:%S")
-        
-        file_exists = os.path.isfile(LOG_FILE_PATH)
-        with open(LOG_FILE_PATH, "a") as f:
-            if not file_exists:
-                f.write("Name,Date,Time\n")
-            f.write(f"yassin,{date_str},{time_str}\n")
-            
-        print(f"📝 Logged: yassin at {time_str}")
-        os.system("say 'Welcome Yassin, access granted' &")
-        last_granted_time = current_time
-
-def process_access_denied():
-    """دالة مستقلة تماماً لرفض الغرباء"""
-    global last_denied_time
-    current_time = time.time()
-    
-    if current_time - last_denied_time > cooldown_duration:
-        print("❌ Access Denied Logged")
-        os.system("say 'Access denied' &")
-        last_denied_time = current_time
-
-# 6. تشغيل الكاميرا
 cap = cv2.VideoCapture(1) # 1 لكاميرا الماك
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 
-print("📸 Giant 3048-Class System Online & Ready...")
+print("📸 Dynamic Face Verification System Online...")
 
 while True:
     ret, frame = cap.read()
-    if not ret: 
-        break
-    
+    if not ret: break
+
     frame = cv2.flip(frame, 1)
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(100, 100))
-
-    if len(faces) == 0:
-        yassin_frames_counter = 0
-        unknown_frames_counter = 0
 
     for (x, y, w, h) in faces:
         face_img = frame[y:y+h, x:x+w]
         face_pil = Image.fromarray(cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB))
         input_tensor = transform(face_pil).unsqueeze(0).to(DEVICE)
-        
+
+        # استخراج البصمة الرقمية الحالية لوجهك
         with torch.no_grad():
-            outputs = model(input_tensor)
-            probs = torch.nn.functional.softmax(outputs, dim=1)
-            conf, pred_idx = torch.max(probs, 1)
-            predicted_name = idx_to_class[pred_idx.item()]
-            confidence = conf.item() * 100
+            embedding = model(input_tensor).squeeze().cpu().numpy()
+            embedding = embedding / np.linalg.norm(embedding)
 
-        # التثبت والـ Stabilization
-        if predicted_name == "yassin" and confidence > 75:
-            yassin_frames_counter += 1
-            unknown_frames_counter = 0
-            
-            name_to_display = "yassin"
-            color = (0, 255, 0)
-            
-            if yassin_frames_counter >= STABILIZATION_THRESHOLD:
-                cv2.putText(frame, "ACCESS GRANTED ✅", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
-                process_access_granted()
+        best_match = "Unknown"
+        min_dist = float("inf")
+
+        # المقارنة الحقيقية مع الـ Database الديناميكية
+        for user, data in database.items():
+            db_embedding = data["embedding"]
+            dist = np.linalg.norm(embedding - db_embedding)
+            if dist < min_dist:
+                min_dist = dist
+                if dist < THRESHOLD:
+                    best_match = user
+
+        # تحديث الواجهة والنطق بالاسم
+        if best_match != "Unknown":
+            color = (0, 255, 0)  # أخضر لوجه معروف
+            label = f"{best_match.upper()} (Dist: {min_dist:.2f})"
+
+            current_time = time.time()
+            if current_time - last_granted_time > 10:
+                now = datetime.now()
+                with open(LOG_FILE_PATH, "a") as f:
+                    f.write(f"{best_match},{now.strftime('%Y-%m-%d')},{now.strftime('%H:%M:%S')}\n")
+                
+                print(f"📝 Access Granted: {best_match}")
+                os.system(f"say 'Welcome {best_match}' &")
+                last_granted_time = current_time
         else:
-            unknown_frames_counter += 1
-            yassin_frames_counter = 0
-            
-            name_to_display = "Unknown"
-            color = (0, 0, 255)
-            
-            if unknown_frames_counter >= STABILIZATION_THRESHOLD:
-                process_access_denied()
+            color = (0, 0, 255)  # أحمر للغرباء
+            label = f"Unknown (Best Dist: {min_dist:.2f})"
 
-        # رسم الإطار والنسبة
-        label = f"{name_to_display} ({confidence:.1f}%)"
         cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
-        cv2.putText(frame, label, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+        cv2.putText(frame, label, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
-    cv2.imshow("Face Access System - M4 Full", frame)
-    
-    if cv2.waitKey(1) & 0xFF == ord('q'): 
-        break
+    cv2.imshow("Dynamic Face Access Verification", frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'): break
 
 cap.release()
 cv2.destroyAllWindows()

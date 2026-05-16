@@ -9,21 +9,21 @@ from PIL import Image
 from torchvision import transforms
 from facenet_pytorch import InceptionResnetV1
 
-# 1. إعدادات الجهاز والمسارات
+# 1. إعدادات الجهاز والمسارات (🎯 تم التحديث للموديل المليوني الكامل 🎯)
 DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-MODEL_PATH = "models/face_classifier_subset.pth"
-MAPPING_PATH = "models/class_mapping.pkl"
+MODEL_PATH = "models/face_classifier_full.pth"
+MAPPING_PATH = "models/class_mapping_full.pkl"
 LOG_FILE_PATH = "database/access_log.csv"
 
 # صنع مجلد الـ database إذا موش موجود
 os.makedirs("database", exist_ok=True)
 
-# 2. تحميل الـ Mapping
+# 2. تحميل الـ Mapping الجديد (3048 كلاص)
 with open(MAPPING_PATH, 'rb') as f:
     class_to_idx = pickle.load(f)
 idx_to_class = {v: k for k, v in class_to_idx.items()}
 
-# 3. بناء وتحميل الموديل
+# 3. بناء وتحميل الموديل العملاق
 base_model = InceptionResnetV1(pretrained='vggface2').to(DEVICE)
 num_classes = len(idx_to_class)
 
@@ -51,12 +51,11 @@ transform = transforms.Compose([
 # 5. متغيرات الـ Cooldown والـ Stabilization
 last_granted_time = 0
 last_denied_time = 0
-cooldown_duration = 10  # 10 ثواني مهلة بين الإشعارات الصوتية
+cooldown_duration = 10  
 
-# --- 🎯 عدادات التثبيت لمنع التداخل عند التشغيل 🎯 ---
 yassin_frames_counter = 0
 unknown_frames_counter = 0
-STABILIZATION_THRESHOLD = 5  # يجب أن يتكرر التوقع 5 مرات متتالية ليطلق الصوت
+STABILIZATION_THRESHOLD = 5  # الثبات على 5 إطارات قبل النطق
 
 def process_access_granted():
     """دالة مستقلة للترحيب بياسين وتسجيله"""
@@ -92,7 +91,7 @@ def process_access_denied():
 cap = cv2.VideoCapture(1) # 1 لكاميرا الماك
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 
-print("📸 System Online. Frame Stabilization Active (5 frames requirement)...")
+print("📸 Giant 3048-Class System Online & Ready...")
 
 while True:
     ret, frame = cap.read()
@@ -103,7 +102,6 @@ while True:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(100, 100))
 
-    # إذا ما فماش وجوه في الكاميرا، صفر العدادات فوراً
     if len(faces) == 0:
         yassin_frames_counter = 0
         unknown_frames_counter = 0
@@ -120,26 +118,24 @@ while True:
             predicted_name = idx_to_class[pred_idx.item()]
             confidence = conf.item() * 100
 
-        # التثبت الشرطي وتحديث العدادات
+        # التثبت والـ Stabilization
         if predicted_name == "yassin" and confidence > 75:
             yassin_frames_counter += 1
-            unknown_frames_counter = 0  # إلغاء الـ Unknown
+            unknown_frames_counter = 0
             
             name_to_display = "yassin"
             color = (0, 255, 0)
             
-            # ما يتكلم كان ما يتأكد 5 فريمات ورا بعضهم
             if yassin_frames_counter >= STABILIZATION_THRESHOLD:
                 cv2.putText(frame, "ACCESS GRANTED ✅", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
                 process_access_granted()
         else:
             unknown_frames_counter += 1
-            yassin_frames_counter = 0  # إلغاء الـ Yassin
+            yassin_frames_counter = 0
             
             name_to_display = "Unknown"
             color = (0, 0, 255)
             
-            # ما يتكلم كان ما يتأكد 5 فريمات ورا بعضهم
             if unknown_frames_counter >= STABILIZATION_THRESHOLD:
                 process_access_denied()
 
@@ -148,7 +144,7 @@ while True:
         cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
         cv2.putText(frame, label, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
 
-    cv2.imshow("Face Access System - M4", frame)
+    cv2.imshow("Face Access System - M4 Full", frame)
     
     if cv2.waitKey(1) & 0xFF == ord('q'): 
         break

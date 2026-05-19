@@ -2,8 +2,9 @@ import sys
 import cv2
 import pickle
 import os
-import time
+import time  # 🎯 تم التأكيد على وجودها للـ Flush delay
 import numpy as np
+import serial
 from datetime import datetime
 from PIL import Image
 import torch
@@ -16,16 +17,17 @@ from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtGui import QImage, QPixmap
 
 # ==========================================
-# ⚙️ 1. الإعدادات والمسارات
+# ⚙️ 1. الإعدادات والمسارات والنظام
 # ==========================================
 DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 DATASET_DIR = "dataset"
 DATABASE_DIR = "database"
 DATABASE_PATH = os.path.join(DATABASE_DIR, "users_embeddings.pkl")
-LOG_FILE_PATH = os.path.join(DATABASE_DIR, "access_log.csv")
 
 os.makedirs(DATASET_DIR, exist_ok=True)
 os.makedirs(DATABASE_DIR, exist_ok=True)
+
+USB_PORT = "/dev/cu.usbmodem11301" 
 
 THRESHOLD = 0.65  
 STABILIZATION_THRESHOLD = 5 
@@ -33,7 +35,7 @@ STABILIZATION_THRESHOLD = 5
 class FaceAccessApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("🛡️ ULTRA PRO ACCESS CORE AI - PyQt Edition")
+        self.setWindowTitle("🛡️ ULTRA PRO ACCESS CORE AI - Safe Exit Pro")
         self.resize(1100, 700)
         self.setStyleSheet("background-color: #050508; color: #FFFFFF; font-family: Courier;")
         
@@ -43,11 +45,16 @@ class FaceAccessApp(QMainWindow):
         self.enroll_user_name = ""
         self.enroll_saved_count = 0
         self.last_capture_time = 0
-        self.last_granted_time = 0
-        self.last_denied_time = 0
-        self.cooldown_duration = 10
         self.user_counters = {}
+        self.last_triggered_state = None 
         
+        self.arduino_serial = None
+        try:
+            self.arduino_serial = serial.Serial(USB_PORT, 9600, timeout=1)
+            print("✅ Arduino Hardware Connected via USB!")
+        except Exception:
+            print("ℹ️ Running in Screen-Only Mode (No Arduino USB detected).")
+
         self.init_ui()
         self.show()
         QApplication.processEvents()
@@ -60,7 +67,6 @@ class FaceAccessApp(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # --- Sidebar ---
         sidebar = QFrame()
         sidebar.setStyleSheet("background-color: #111118; border-right: 2px solid #272732;")
         sidebar.setFixedWidth(320)
@@ -73,10 +79,8 @@ class FaceAccessApp(QMainWindow):
         side_layout.addSpacing(30)
 
         btn_style = """
-            QPushButton {
-                background-color: #050508; color: #00EEFF; border: 2px solid #00EEFF;
-                font-size: 15px; font-weight: bold; padding: 15px; border-radius: 5px;
-            }
+            QPushButton { background-color: #050508; color: #00EEFF; border: 2px solid #00EEFF;
+                          font-size: 15px; font-weight: bold; padding: 15px; border-radius: 5px; }
             QPushButton:hover { background-color: #00EEFF; color: #050508; }
         """
         btn_verify_style = btn_style.replace("#00EEFF", "#00FF66")
@@ -98,7 +102,6 @@ class FaceAccessApp(QMainWindow):
         self.btn_stop.setStyleSheet(btn_stop_style)
         self.btn_stop.clicked.connect(self.return_to_idle)
         side_layout.addWidget(self.btn_stop)
-        
         side_layout.addStretch()
 
         self.lbl_stats = QLabel("SYSTEM LOGS")
@@ -115,7 +118,6 @@ class FaceAccessApp(QMainWindow):
 
         main_layout.addWidget(sidebar)
 
-        # --- Main Video Area ---
         view_area = QFrame()
         view_area.setStyleSheet("background-color: #050508; border: none;")
         view_layout = QVBoxLayout(view_area)
@@ -139,7 +141,6 @@ class FaceAccessApp(QMainWindow):
         ])
         self.face_model = InceptionResnetV1(pretrained="vggface2").eval().to(DEVICE)
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        
         self.load_system_database()
         self.lbl_log.setText("Status: READY")
         self.lbl_log.setStyleSheet("color: #00FF66; font-size: 14px; border: none; margin-top: 10px;")
@@ -155,24 +156,64 @@ class FaceAccessApp(QMainWindow):
         else:
             self.database = {}
 
+    # ==========================================
+    # 🎯 تعديل دالة الإيقاف لضمان خروج الإشارة بالكامل
+    # ==========================================
     def return_to_idle(self):
         self.current_mode = "IDLE"
         self.timer.stop()
         if self.cap:
             self.cap.release()
             self.cap = None
+            
+        if self.arduino_serial: 
+            try:
+                self.arduino_serial.write(b'O')
+                self.arduino_serial.flush() # 🎯 إجبار السيستيم على تفريغ الداتا في الكابل فوراً
+                print("🛑 STOP/EXIT: Sent 'O' to turn off all LEDs.")
+            except Exception as e:
+                print(f"Serial write error: {e}")
+            
         self.video_label.clear()
         self.video_label.setText("SYSTEM STANDBY")
         self.lbl_log.setText("Status: READY")
         self.lbl_log.setStyleSheet("color: #94A3B8; font-size: 14px; border: none; margin-top: 10px;")
+        self.last_triggered_state = None 
+
+    # ==========================================
+    # 🎯 تعديل دالة الـ Close لحجز 0.1 ثانية قبل تدمير الـ Object
+    # ==========================================
+    def closeEvent(self, event):
+        self.return_to_idle() 
+        if self.arduino_serial:
+            try:
+                time.sleep(0.1) # 🎯 تثبيت زمن الـ 100ms لضمان وصول حرف الـ O للأردوينو قبل غلق البورت
+                self.arduino_serial.close()
+                print("🔌 Serial connection closed cleanly.")
+            except Exception:
+                pass
+        event.accept()
+
+    def request_camera_index(self):
+        cameras = ["0: iPhone Continuity Camera", "1: Mac Built-in FaceTime HD Camera"]
+        item, ok = QInputDialog.getItem(self, "Camera Selection", "Choose Video Source:", cameras, 1, False)
+        if ok and item:
+            chosen_index = int(item.split(":")[0])
+            return chosen_index
+        return None
 
     def start_verification_mode(self):
         self.load_system_database()
         if not self.database:
             QMessageBox.warning(self, "Error", "Database Empty! Add an identity first.")
             return
+            
+        cam_idx = self.request_camera_index()
+        if cam_idx is None: return 
+        
         self.return_to_idle()
-        self.cap = cv2.VideoCapture(1)
+        self.last_triggered_state = None 
+        self.cap = cv2.VideoCapture(cam_idx) 
         self.current_mode = "VERIFYING"
         self.lbl_log.setText("Status: SCANNING...")
         self.lbl_log.setStyleSheet("color: #00FF66; font-size: 14px; border: none; margin-top: 10px;")
@@ -181,14 +222,17 @@ class FaceAccessApp(QMainWindow):
     def start_enrollment_mode(self):
         name, ok = QInputDialog.getText(self, "Identity Registration", "Enter Target ID Name:")
         if not ok or not name.strip(): return
-        self.return_to_idle()
         
+        cam_idx = self.request_camera_index()
+        if cam_idx is None: return 
+        
+        self.return_to_idle()
         self.enroll_user_name = name.strip().lower()
         self.enroll_saved_count = 0
         self.user_path = os.path.join(DATASET_DIR, self.enroll_user_name)
         os.makedirs(self.user_path, exist_ok=True)
         
-        self.cap = cv2.VideoCapture(1)
+        self.cap = cv2.VideoCapture(cam_idx) 
         self.current_mode = "ENROLLING"
         self.lbl_log.setText(f"Status: LOCKING {self.enroll_user_name.upper()}")
         self.lbl_log.setStyleSheet("color: #00EEFF; font-size: 14px; border: none; margin-top: 10px;")
@@ -201,8 +245,6 @@ class FaceAccessApp(QMainWindow):
 
         frame = cv2.flip(frame, 1)
         frame = cv2.resize(frame, (800, 600))
-        
-        # نسخة نظيفة للذكاء الاصطناعي
         clean_frame = frame.copy()
         
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -210,86 +252,102 @@ class FaceAccessApp(QMainWindow):
 
         if len(faces) == 0:
             for k in self.user_counters: self.user_counters[k] = 0
+            if self.last_triggered_state != "Empty":
+                if self.arduino_serial: 
+                    try:
+                        self.arduino_serial.write(b'O')
+                        self.arduino_serial.flush()
+                    except Exception: pass
+                self.last_triggered_state = "Empty"
 
         margin = 45 
 
-        if self.current_mode == "ENROLLING":
-            if len(faces) > 0:
-                faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
-                x, y, w, h = faces[0]
-                
-                x1, y1 = max(0, x - margin), max(0, y - margin)
-                x2, y2 = min(frame.shape[1], x + w + margin), min(frame.shape[0], y + h + margin)
-                
-                face_img = clean_frame[y1:y2, x1:x2]
-                
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 238, 0), 2)
-                cv2.putText(frame, f"ACQUIRING: {self.enroll_saved_count}/150", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 238, 0), 2)
-                
-                if time.time() - self.last_capture_time >= 0.04 and self.enroll_saved_count < 150:
-                    self.enroll_saved_count += 1
-                    cv2.imwrite(os.path.join(self.user_path, f"{self.enroll_user_name}_{self.enroll_saved_count:03d}.jpg"), face_img)
-                    self.last_capture_time = time.time()
-                
-                if self.enroll_saved_count >= 150:
-                    self.return_to_idle()
-                    self.background_db_update()
+        if self.current_mode == "ENROLLING" and len(faces) > 0:
+            faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
+            x, y, w, h = faces[0]
+            x1, y1 = max(0, x - margin), max(0, y - margin)
+            x2, y2 = min(frame.shape[1], x + w + margin), min(frame.shape[0], y + h + margin)
+            
+            face_img = clean_frame[y1:y2, x1:x2]
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 238, 0), 2)
+            cv2.putText(frame, f"ACQUIRING: {self.enroll_saved_count}/150", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 238, 0), 2)
+            
+            if time.time() - self.last_capture_time >= 0.04 and self.enroll_saved_count < 150:
+                self.enroll_saved_count += 1
+                cv2.imwrite(os.path.join(self.user_path, f"{self.enroll_user_name}_{self.enroll_saved_count:03d}.jpg"), face_img)
+                self.last_capture_time = time.time()
+            
+            if self.enroll_saved_count >= 150:
+                self.return_to_idle()
+                self.background_db_update()
 
-        elif self.current_mode == "VERIFYING":
-            for (x, y, w, h) in faces:
-                x1, y1 = max(0, x - margin), max(0, y - margin)
-                x2, y2 = min(frame.shape[1], x + w + margin), min(frame.shape[0], y + h + margin)
+        elif self.current_mode == "VERIFYING" and len(faces) > 0:
+            faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
+            x, y, w, h = faces[0]
+            
+            x1, y1 = max(0, x - margin), max(0, y - margin)
+            x2, y2 = min(frame.shape[1], x + w + margin), min(frame.shape[0], y + h + margin)
+            face_img = clean_frame[y1:y2, x1:x2]
+            
+            try:
+                face_pil = Image.fromarray(cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB))
+                input_tensor = self.transform(face_pil).unsqueeze(0).to(DEVICE)
                 
-                face_img = clean_frame[y1:y2, x1:x2]
-                
-                try:
-                    face_pil = Image.fromarray(cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB))
-                    input_tensor = self.transform(face_pil).unsqueeze(0).to(DEVICE)
+                with torch.no_grad():
+                    embedding = self.face_model(input_tensor).squeeze().cpu().numpy()
+                embedding = embedding / np.linalg.norm(embedding)
+
+                best_match, min_dist = "Unknown", float("inf")
+                for user, data in self.database.items():
+                    dist = np.linalg.norm(embedding - data["embedding"])
+                    if dist < min_dist:
+                        min_dist = dist
+                        if dist < THRESHOLD: best_match = user
+
+                for k in self.user_counters:
+                    if k == best_match: self.user_counters[k] += 1
+                    else: self.user_counters[k] = 0
+
+                if best_match != "Unknown":
+                    color = (102, 255, 0)
+                    label = f"ID: {best_match.upper()}"
                     
-                    with torch.no_grad():
-                        embedding = self.face_model(input_tensor).squeeze().cpu().numpy()
-                    embedding = embedding / np.linalg.norm(embedding)
+                    if self.user_counters[best_match] >= STABILIZATION_THRESHOLD:
+                        cv2.putText(frame, "ACCESS GRANTED", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+                        
+                        if self.last_triggered_state != best_match:
+                            if self.arduino_serial: 
+                                self.arduino_serial.write(b'G')
+                                self.arduino_serial.flush()
+                                print(f"🟢 INSTANT SWITCH: Green LED for {best_match.upper()}")
+                            
+                            self.lbl_log.setText(f"Status: GRANTED\nTarget: {best_match.upper()}")
+                            self.lbl_log.setStyleSheet("color: #00FF66; font-size: 14px; border: none; margin-top: 10px;")
+                            os.system(f"say 'Welcome {best_match}' &")
+                            self.last_triggered_state = best_match
+                else:
+                    color = (85, 0, 255)
+                    label = "UNKNOWN"
+                    
+                    if self.user_counters["Unknown"] >= STABILIZATION_THRESHOLD:
+                        cv2.putText(frame, "ACCESS DENIED", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+                        
+                        if self.last_triggered_state != "Unknown":
+                            if self.arduino_serial: 
+                                self.arduino_serial.write(b'D')
+                                self.arduino_serial.flush()
+                                print("🔴 INSTANT SWITCH: Red LED for UNKNOWN")
+                            
+                            self.lbl_log.setText("Status: DENIED\nTarget: UNKNOWN")
+                            self.lbl_log.setStyleSheet("color: #FF0055; font-size: 14px; border: none; margin-top: 10px;")
+                            os.system(f"say 'Access denied' &")
+                            self.last_triggered_state = "Unknown"
 
-                    best_match, min_dist = "Unknown", float("inf")
-                    for user, data in self.database.items():
-                        dist = np.linalg.norm(embedding - data["embedding"])
-                        if dist < min_dist:
-                            min_dist = dist
-                            if dist < THRESHOLD: best_match = user
+                cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
+                cv2.putText(frame, label, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            except Exception:
+                pass
 
-                    for k in self.user_counters:
-                        if k == best_match: self.user_counters[k] += 1
-                        else: self.user_counters[k] = 0
-
-                    if best_match != "Unknown":
-                        color = (102, 255, 0) # Green BGR
-                        # 🎯 التعديل: إظهار الاسم فقط بدون Score
-                        label = f"ID: {best_match.upper()}"
-                        if self.user_counters[best_match] >= STABILIZATION_THRESHOLD:
-                            cv2.putText(frame, "ACCESS GRANTED", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-                            if time.time() - self.last_granted_time > self.cooldown_duration:
-                                self.lbl_log.setText(f"Status: GRANTED\nTarget: {best_match.upper()}")
-                                self.lbl_log.setStyleSheet("color: #00FF66; font-size: 14px; border: none; margin-top: 10px;")
-                                os.system(f"say 'Welcome {best_match}, access granted' &")
-                                self.last_granted_time = time.time()
-                    else:
-                        color = (85, 0, 255) # Red BGR
-                        # 🎯 التعديل: إظهار UNKNOWN فقط بدون Score
-                        label = "UNKNOWN"
-                        if self.user_counters["Unknown"] >= STABILIZATION_THRESHOLD:
-                            cv2.putText(frame, "ACCESS DENIED", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-                            if time.time() - self.last_denied_time > self.cooldown_duration:
-                                self.lbl_log.setText("Status: DENIED\nTarget: UNKNOWN")
-                                self.lbl_log.setStyleSheet("color: #FF0055; font-size: 14px; border: none; margin-top: 10px;")
-                                os.system(f"say 'Access denied' &")
-                                self.last_denied_time = time.time()
-
-                    cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
-                    cv2.putText(frame, label, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-                except Exception:
-                    pass
-
-        # تحويل الصورة للعرض في PyQt5
         rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_image.shape
         bytes_per_line = ch * w
@@ -309,11 +367,7 @@ class FaceAccessApp(QMainWindow):
             img_path = os.path.join(user_folder, img_name)
             try:
                 img = Image.open(img_path).convert('RGB')
-                img_array = np.array(img).astype(np.float32)
-                img_array = (img_array - 127.5) / 128.0
-                img_array = np.transpose(img_array, (2, 0, 1))
-                tensor = torch.tensor(img_array).unsqueeze(0).to(DEVICE)
-                
+                tensor = self.transform(img).unsqueeze(0).to(DEVICE)
                 with torch.no_grad():
                     emb = self.face_model(tensor).squeeze().cpu().numpy()
                 emb = emb / np.linalg.norm(emb)
@@ -325,13 +379,14 @@ class FaceAccessApp(QMainWindow):
             avg_emb = np.mean(user_embeddings, axis=0)
             avg_emb = avg_emb / np.linalg.norm(avg_emb)
             
+            database = {}
             if os.path.exists(DATABASE_PATH):
                 with open(DATABASE_PATH, 'rb') as f:
-                    self.database = pickle.load(f)
+                    database = pickle.load(f)
             
-            self.database[self.enroll_user_name] = {"embedding": avg_emb, "num_images": len(user_embeddings)}
+            database[self.enroll_user_name] = {"embedding": avg_emb, "num_images": len(user_embeddings)}
             with open(DATABASE_PATH, "wb") as f:
-                pickle.dump(self.database, f)
+                pickle.dump(database, f)
             
             self.load_system_database()
             self.lbl_log.setText("Status: READY")

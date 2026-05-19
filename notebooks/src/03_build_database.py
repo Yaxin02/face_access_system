@@ -9,7 +9,7 @@ from PIL import Image
 from facenet_pytorch import InceptionResnetV1
 
 # Configuration mta3 l-paths kima scripts l-o5rin
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(PROJECT_ROOT))
 
 from config.paths import PROCESSED_DIR

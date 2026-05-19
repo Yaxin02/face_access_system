@@ -20,8 +20,9 @@ from PyQt5.QtGui import QImage, QPixmap
 # ⚙️ 1. الإعدادات والمسارات والنظام
 # ==========================================
 DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-DATASET_DIR = "dataset"
-DATABASE_DIR = "database"
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+DATASET_DIR = os.path.join(PROJECT_ROOT, "dataset")
+DATABASE_DIR = os.path.join(PROJECT_ROOT, "database")
 DATABASE_PATH = os.path.join(DATABASE_DIR, "users_embeddings.pkl")
 
 os.makedirs(DATASET_DIR, exist_ok=True)

@@ -9,17 +9,21 @@ from PIL import Image
 from torchvision import transforms
 from facenet_pytorch import InceptionResnetV1
 
+from project_paths import DATABASE_PATH, LOG_FILE_PATH, setup_sys_path
+
+setup_sys_path()
+
 # 1. إعدادات الجهاز والمسارات
 DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-DATABASE_PATH = "database/users_embeddings.pkl"
-LOG_FILE_PATH = "database/access_log.csv"
+DATABASE_PATH = str(DATABASE_PATH)
+LOG_FILE_PATH = str(LOG_FILE_PATH)
 
 # حد المسافة الإقليدية (Threshold) - كل ما تصغره يولي السيستيم صارم أكثر
 THRESHOLD = 0.68  
 
 if not os.path.exists(DATABASE_PATH):
     print(f"❌ Error: Database file not found at {DATABASE_PATH}.")
-    print("👉 Please run: python3 build_database.py first!")
+    print("👉 Please run: python3 notebooks/build_database.py first!")
     exit()
 
 # 2. تحميل قاعدة أوزان المستخدمين المحليين

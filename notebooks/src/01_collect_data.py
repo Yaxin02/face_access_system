@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 # باش Python يلقى config/paths.py
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(PROJECT_ROOT))
 
 from config.paths import RAW_DIR

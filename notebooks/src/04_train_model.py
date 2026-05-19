@@ -16,14 +16,23 @@ from facenet_pytorch import InceptionResnetV1
 # ==========================================
 # ⚙️ 1. الإعدادات والمسارات العامة
 # ==========================================
-DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-DATASET_DIR = "dataset"
-DATABASE_DIR = "database"
-DATABASE_PATH = os.path.join(DATABASE_DIR, "users_embeddings.pkl")
-LOG_FILE_PATH = os.path.join(DATABASE_DIR, "access_log.csv")
+import sys
+from pathlib import Path
 
-os.makedirs(DATASET_DIR, exist_ok=True)
-os.makedirs(DATABASE_DIR, exist_ok=True)
+NOTEBOOKS_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = NOTEBOOKS_ROOT.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(NOTEBOOKS_ROOT))
+
+from project_paths import DATASET_DIR, DATABASE_DIR, DATABASE_PATH, LOG_FILE_PATH, ensure_data_dirs
+
+DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+DATASET_DIR = str(DATASET_DIR)
+DATABASE_DIR = str(DATABASE_DIR)
+DATABASE_PATH = str(DATABASE_PATH)
+LOG_FILE_PATH = str(LOG_FILE_PATH)
+
+ensure_data_dirs()
 
 # ألوان الـ Dashboard الاحترافي
 COLOR_BG = "#0F0F12"       

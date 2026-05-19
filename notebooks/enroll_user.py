@@ -3,8 +3,11 @@ import os
 import time
 import importlib
 
+from project_paths import DATASET_DIR, setup_sys_path
+
+setup_sys_path()
+
 CAMERA_INDEX = 1
-DATASET_DIR = "dataset"  # المجلد المحلي للمصرح لهم
 
 TOTAL_SAMPLES = 150  
 CAPTURE_DELAY = 0.05  # تسريع دفق اللقطات
@@ -16,7 +19,7 @@ if user_name == "":
     exit()
 
 # 🎯 أتمتة 1: صنع المجلد تلقائياً بالاسم الجديد داخل dataset
-user_path = os.path.join(DATASET_DIR, user_name)
+user_path = os.path.join(str(DATASET_DIR), user_name)
 os.makedirs(user_path, exist_ok=True)
 
 existing_images = [

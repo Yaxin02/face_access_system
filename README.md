@@ -56,6 +56,14 @@ The platform is **decoupled** into two cooperating layers:
 | **ENROLLING** | Captures **150** face crops per user → builds mean embedding → updates `.pkl` DB |
 | **VERIFYING** | Live 1:N match against `users_embeddings.pkl`; triggers hardware + voice on stable match |
 
+### Client interfaces
+
+| Layer | File | Role |
+|-------|------|------|
+| **Production** | `main.py` | PyQt5 app — live camera, FaceNet, Arduino I/O |
+| **Web dashboard** | `streamlit_dashboard.py` | Browser control panel — launcher + read-only analytics |
+| **Research / CLI** | `notebooks/*` | Jupyter experiments & offline scripts |
+
 ---
 
 ## 📊 Data Science & Research Methodology
@@ -153,7 +161,9 @@ ls /dev/cu.usbmodem*
 face_access_system/
 ├── main.py                      # 🎯 Production app: PyQt5 UI + FaceNet + Arduino serial
 ├── streamlit_dashboard.py       # Web control panel (launcher + read-only analytics)
-├── requirements.txt             # Python dependencies (PyTorch, facenet-pytorch, PyQt5, pyserial…)
+├── .streamlit/
+│   └── config.toml              # Light theme for the Streamlit dashboard
+├── requirements.txt             # Python dependencies (PyTorch, facenet-pytorch, PyQt5, streamlit, pyserial…)
 ├── config/
 │   └── paths.py                 # SSD / external data paths (.env driven)
 ├── notebooks/                   # 📓 Data Science, research & offline tooling
@@ -287,6 +297,52 @@ python3 main.py
 | `0` | iPhone Continuity Camera |
 | `1` | Mac Built-in FaceTime HD Camera (default selection) |
 
+---
+
+## 🌐 Streamlit Web Control Panel
+
+`streamlit_dashboard.py` is a **standalone browser dashboard** that wraps the production app. It does **not** reimplement face recognition—it **launches** `main.py` and surfaces **read-only** system metrics.
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **▶ Launch Safe Exit Pro Core** | Starts `main.py` in the background via `subprocess` (uses `venv/bin/python3` when available) |
+| **PyQt status** | Sidebar shows whether the desktop app is **RUNNING** or **STOPPED** |
+| **Total Enrolled Users** | Reads `database/users_embeddings.pkl` (read-only) |
+| **Dataset analytics** | Scans `dataset/<identity>/` and counts images per user |
+| **Identity table** | Merged view: embedding DB + folder stats |
+| **Light corporate UI** | White theme via `.streamlit/config.toml` + custom CSS |
+
+### Run the dashboard
+
+```bash
+cd /path/to/face_access_system
+source venv/bin/activate
+
+# Recommended (avoids broken venv script paths after moving the project)
+./venv/bin/python3 -m streamlit run streamlit_dashboard.py
+```
+
+Browser opens at **http://localhost:8501**
+
+| Dashboard control | Action |
+|-------------------|--------|
+| **▶ Launch Safe Exit Pro Core** | Opens the PyQt5 app (check Dock / Cmd+Tab) |
+| **🔄 Refresh status** | Reloads metrics and PyQt running state |
+
+> **Note:** Use the Streamlit panel for **monitoring and launching**. Enrollment, scanning, camera, and Arduino control remain in the **PyQt app** (`main.py`).
+
+### Architecture (Streamlit layer)
+
+```
+Browser (Streamlit)  ──subprocess──▶  main.py (PyQt5 + FaceNet + Arduino)
+       │                                      │
+       └── read-only ──▶  dataset/  +  database/users_embeddings.pkl
+```
+
+---
+
 ### Offline / developer utilities
 
 ```bash
@@ -358,6 +414,8 @@ Each entry in `database/users_embeddings.pkl`:
 | `Database Empty!` | No `.pkl` or empty DB | Run **ADD IDENTITY** or `notebooks/build_database.py` |
 | LEDs stuck on | Missing `O` on exit | Press **STOP ENGINE** or restart app |
 | Slow first launch | FaceNet weight download | Wait for one-time download to finish |
+| `bad interpreter` on `streamlit` | venv created at old path | Use `./venv/bin/python3 -m streamlit run streamlit_dashboard.py` |
+| Streamlit shows 0 users | Empty or missing `.pkl` | Enroll via PyQt **ADD IDENTITY** or run `notebooks/build_database.py` |
 
 ---
 
